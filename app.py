@@ -1,21 +1,17 @@
 # app.py
 # =========================================================
-# WES Ops Dashboard (Upload-ready)
+# PETS - WES Ops Dashboard (Upload-ready)
 #
-# YOUR GOAL:
-# 1) Identify which scanner has the MOST NOREAD and NOSCAN % (from "exception pct")
-# 2) Show scanner % statistics (overall pct) and supporting pages
-# 3) Shipping lanes: show BOTH counts and % contribution (not only counts)
-#
-# FIXES INCLUDED:
-# - KPI cards use Streamlit-native st.metric (no raw HTML showing)
-# - Robust column detection (spaces/case)
-# - Percent normalization (0.07 -> 7)
-# - Exception pct averages ignore blanks (Excel-like)
-# - Colourful charts + readable axes (Light/Dark)
-#
-# Workbook tab order:
-# total → exception pct → overall pct → shipping lanes → carrier → scan → errors → mission error
+# CHANGES (your latest requests):
+# 1) KEEP carrier brand colours (EVRI/DPD/Parcel Force) + KEEP Area colours (do not change)
+# 2) For ALL OTHER charts: use severity colour order (high -> low)
+#    Red -> Orange -> Yellow -> Light Green -> Green -> Grey
+# 3) Add Executive Dashboard (PowerBI-style) tab:
+#    - Donut chart for Shift % (Last 24h)
+#    - Replace "Last 24h: exception type share %" chart with:
+#        ✅ Most affected tote (Source/Destination) + top source tote + top destination tote
+#    - Replace "Top lanes by boxes" with:
+#        ✅ Ship lane % share (derived) (carrier brand colours preserved)
 # =========================================================
 
 import streamlit as st
@@ -29,7 +25,7 @@ import re
 # =========================================================
 # Page setup
 # =========================================================
-st.set_page_config(page_title="WES Ops Dashboard", page_icon="🐾", layout="wide")
+st.set_page_config(page_title="PETS WES Ops Dashboard", page_icon="🐾", layout="wide")
 
 # =========================================================
 # Theme selector + Plotly template
@@ -38,7 +34,7 @@ THEME = st.sidebar.selectbox("🎨 Theme", ["Light", "Dark"], index=0)
 px.defaults.template = "plotly_white" if THEME == "Light" else "plotly_dark"
 
 # =========================================================
-# CSS (background + chart cards + metric cards)
+# CSS (background + chart cards + metric cards + no overflow)
 # =========================================================
 LIGHT_CSS = """
 <style>
@@ -57,7 +53,47 @@ LIGHT_CSS = """
   h1 {font-size: 32px !important;}
   h2 {font-size: 24px !important;}
   h3 {font-size: 18px !important;}
-  h1,h2,h3,p,li,span,div {color: var(--text) !important;}
+  h1,h2,h3,{color: var(--text); !important}
+  
+div {
+  color: green;
+}
+
+.st-emotion-cache-1c87b1z {
+color: rgb(33 31 31);
+}
+
+.st-emotion-cache-p7mjpa {
+    width: calc(16.6667% - 1rem);
+    flex: 1 1 calc(16.6667% - 1rem);
+    padding: 1rem 1.2rem;
+    border-radius: 14px;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+
+    /* --- 3D Magic Starts Here --- */
+    background: linear-gradient(145deg, #ffffff, #e0e0e0);
+    box-shadow:
+        8px 8px 16px rgba(0, 0, 0, 0.25),      /* deep outer shadow */
+        -4px -4px 12px rgba(255, 255, 255, .8), /* top-left highlight */
+        inset 2px 2px 6px rgba(0,0,0,0.15),     /* inner depth */
+        inset -2px -2px 6px rgba(255,255,255,0.7); /* inner highlight */
+
+    transform: translateY(0);
+    transition: all 0.25s ease;
+}
+
+/* 3D Hover lift effect */
+.st-emotion-cache-p7mjpa:hover {
+    transform: translateY(-6px);
+    box-shadow:
+        12px 12px 24px rgba(0,0,0,0.3),
+        -4px -4px 16px rgba(255,255,255,0.9),
+        inset 1px 1px 3px rgba(0,0,0,0.1),
+        inset -1px -1px 3px rgba(255,255,255,0.6);
+}
 
   .hero{
     display:flex; align-items:center; justify-content:space-between; gap:18px;
@@ -86,7 +122,6 @@ LIGHT_CSS = """
     padding: 6px;
   }
 
-  /* Make st.metric look like cards */
   div[data-testid="metric-container"]{
     border: 1px solid rgba(10,20,60,0.10);
     background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(255,255,255,0.78));
@@ -94,6 +129,27 @@ LIGHT_CSS = """
     padding: 14px 14px;
     box-shadow: 0 18px 44px rgba(10,20,60,0.10);
     height: 100%;
+    overflow: hidden;
+  }
+  div[data-testid="metric-container"] [data-testid="stMetricLabel"]{
+    font-size: 0.90rem;
+    line-height: 1.15rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    opacity: 0.85;
+  }
+  div[data-testid="metric-container"] [data-testid="stMetricValue"]{
+    font-size: 1.55rem;
+    line-height: 1.9rem;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  div[data-testid="metric-container"] [data-testid="stMetricDelta"]{
+    font-size: 0.85rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    opacity: 0.85;
   }
 </style>
 """
@@ -151,6 +207,27 @@ DARK_CSS = """
     padding: 14px 14px;
     box-shadow: 0 18px 44px rgba(0,0,0,0.45);
     height: 100%;
+    overflow: hidden;
+  }
+  div[data-testid="metric-container"] [data-testid="stMetricLabel"]{
+    font-size: 0.90rem;
+    line-height: 1.15rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    opacity: 0.88;
+  }
+  div[data-testid="metric-container"] [data-testid="stMetricValue"]{
+    font-size: 1.55rem;
+    line-height: 1.9rem;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  div[data-testid="metric-container"] [data-testid="stMetricDelta"]{
+    font-size: 0.85rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    opacity: 0.88;
   }
 </style>
 """
@@ -192,7 +269,6 @@ def to_num(series: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 def normalize_percent_series(s: pd.Series) -> pd.Series:
-    """If values look like 0..1, convert to 0..100."""
     s = pd.to_numeric(s, errors="coerce")
     mx = s.max(skipna=True)
     if pd.notna(mx) and mx <= 1:
@@ -225,6 +301,9 @@ def area_from_dp(dp: str) -> str:
         return "SHUTTLE"
     return "OTHER"
 
+def safe_percent_str(x):
+    return f"{x:.2f}%" if pd.notna(x) else "—"
+
 def fig_style(fig, title=None, subtitle=None, x_title=None, y_title=None):
     if THEME == "Light":
         font_color = "#0F172A"
@@ -243,8 +322,7 @@ def fig_style(fig, title=None, subtitle=None, x_title=None, y_title=None):
         fig.update_layout(
             title=dict(
                 text=f"{title}<br><span style='font-size:13px; opacity:0.75'>{subtitle}</span>",
-                x=0.01,
-                xanchor="left",
+                x=0.01, xanchor="left",
             )
         )
     elif title:
@@ -263,15 +341,15 @@ def fig_style(fig, title=None, subtitle=None, x_title=None, y_title=None):
         title_font=dict(size=22, color=font_color),
         legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=12, color=font_color)),
         hoverlabel=dict(bgcolor=hover_bg, font=dict(color=hover_font)),
-        colorway=["#2F7EF7", "#19B37A", "#7C3AED", "#F59E0B", "#EC4899", "#06B6D4", "#EF4444", "#A3E635", "#F97316"],
         bargap=0.25,
     )
-    fig.update_xaxes(showgrid=True, gridcolor=grid_color, linecolor=axis_color, tickfont=dict(size=12, color=font_color), title_font=dict(size=16, color=font_color))
-    fig.update_yaxes(showgrid=True, gridcolor=grid_color, linecolor=axis_color, tickfont=dict(size=12, color=font_color), title_font=dict(size=16, color=font_color))
+    fig.update_xaxes(showgrid=True, gridcolor=grid_color, linecolor=axis_color,
+                     tickfont=dict(size=12, color=font_color), title_font=dict(size=16, color=font_color))
+    fig.update_yaxes(showgrid=True, gridcolor=grid_color, linecolor=axis_color,
+                     tickfont=dict(size=12, color=font_color), title_font=dict(size=16, color=font_color))
     return fig
 
 def percent_col_lookup(df: pd.DataFrame, wanted: str) -> str | None:
-    """Find exception pct column matching wanted exception type (e.g., NOREAD, NOSCAN)."""
     w = norm_text(wanted).replace(" ", "")
     for c in df.columns:
         if c in ["Decision Point", "Area"]:
@@ -288,24 +366,82 @@ def percent_col_lookup(df: pd.DataFrame, wanted: str) -> str | None:
     return None
 
 def rank_scanners_by_exception_pct(exc_pct_df: pd.DataFrame, exc_col: str, ignore_blanks: bool, top_n: int):
-    """Return (top_df, full_rank_df). Top is highest→lowest."""
     if exc_col not in exc_pct_df.columns:
         return pd.DataFrame(columns=["Decision Point", "Rate %"]), pd.DataFrame(columns=["Decision Point", "Rate %"])
-
     r = exc_pct_df[["Decision Point", exc_col]].copy()
     r = r.rename(columns={exc_col: "Rate %"})
     r["Rate %"] = normalize_percent_series(r["Rate %"])
-
     if ignore_blanks:
         r = r.dropna(subset=["Rate %"])
     else:
         r["Rate %"] = r["Rate %"].fillna(0)
-
     r = r.sort_values("Rate %", ascending=False)
     return r.head(top_n).copy(), r.copy()
 
-def safe_percent_str(x):
-    return f"{x:.2f}%" if pd.notna(x) else "—"
+# =========================================================
+# Severity colours (use for ALL charts except:
+# - Carrier brand colours (EVRI/DPD/Parcel Force)
+# - Area colours (Area categories)
+# =========================================================
+SEVERITY = {
+    "RED": "#EF4444",
+    "ORANGE": "#F97316",
+    "YELLOW": "#F59E0B",
+    "LIGHT_GREEN": "#A3E635",
+    "GREEN": "#22C55E",
+    "GREY": "#94A3B8",
+}
+
+def severity_bucket_color(rank: int, n: int) -> str:
+    """
+    Map rank (0=highest) to severity colours.
+    Uses buckets by percentile so it scales with any chart length.
+    """
+    if n <= 1:
+        return SEVERITY["RED"]
+    p = rank / (n - 1)  # 0..1
+    if p <= 0.10:
+        return SEVERITY["RED"]
+    if p <= 0.30:
+        return SEVERITY["ORANGE"]
+    if p <= 0.55:
+        return SEVERITY["YELLOW"]
+    if p <= 0.75:
+        return SEVERITY["LIGHT_GREEN"]
+    if p <= 0.92:
+        return SEVERITY["GREEN"]
+    return SEVERITY["GREY"]
+
+def apply_severity_bar_colors(fig, ordered_values: list[float]):
+    """Apply severity colours to a single-trace bar chart, based on descending order."""
+    n = len(ordered_values)
+    colors = [severity_bucket_color(i, n) for i in range(n)]
+    fig.update_traces(marker=dict(color=colors))
+    return fig
+
+# =========================================================
+# Brand carrier colours + normalization (KEEP)
+# =========================================================
+BRAND_COLORS = {
+    "EVRI": "#007BC4",
+    "DPD": "#DC0032",
+    "PARCEL FORCE": "#ED2929",
+    "PARCELFORCE": "#ED2929",
+    "PARCEL FORCE WORLDWIDE": "#ED2929",
+}
+
+def canonical_carrier(x: str) -> str:
+    s = (str(x) if x is not None else "").strip().upper()
+    s = re.sub(r"\s+", " ", s)
+    if s in ["PARCELFORCE", "PARCEL FORCE WORLDWIDE"]:
+        return "PARCEL FORCE"
+    if s.startswith("DPD"):
+        return "DPD"
+    if s.startswith("EVRI"):
+        return "EVRI"
+    if s.startswith("PARCEL FORCE"):
+        return "PARCEL FORCE"
+    return s
 
 # =========================================================
 # Upload Excel
@@ -319,7 +455,7 @@ st.markdown(
     <div class="hero">
       <div>
         <h1 style="margin:0;">🐾 WES Ops Dashboard</h1>
-        <div class="subtitle">Main goal: find top NOREAD / NOSCAN scanners + scanner % statistics</div>
+        <div class="subtitle">Core Scanner KPIs + Executive PowerBI-style dashboard</div>
       </div>
       <div class="pill">📄 File: <b style="margin-left:6px;">{file_label}</b></div>
     </div>
@@ -344,7 +480,6 @@ def read_sheet(file_bytes_: bytes, sheet_name_exact: str) -> pd.DataFrame:
     return normalize_columns(df)
 
 sheet_map = get_sheet_map(file_bytes)
-
 SEQ = ["total", "exception pct", "overall pct", "shipping lanes", "carrier", "scan", "errors", "mission error"]
 missing = [s for s in SEQ if s not in sheet_map]
 if missing:
@@ -367,15 +502,6 @@ df_mission = read_sheet(file_bytes, sheet_map["mission error"])
 df_total_num = df_total.copy()
 for c in df_total_num.columns:
     df_total_num[c] = to_num(df_total_num[c])
-
-def first_number_in_total(df: pd.DataFrame, idx: int) -> float:
-    if df.empty:
-        return 0.0
-    cols = df.columns.tolist()
-    if idx < len(cols):
-        v = df[cols[idx]].iloc[0]
-        return float(v) if pd.notna(v) else 0.0
-    return 0.0
 
 # =========================================================
 # exception pct
@@ -461,52 +587,51 @@ if col_pct: df_ship = df_ship.rename(columns={col_pct: "Percentage"})
 else: df_ship["Percentage"] = np.nan
 
 df_ship["Lane"] = df_ship["Lane"].astype(str).str.strip()
-df_ship["Carrier"] = df_ship["Carrier"].astype(str).str.strip()
+df_ship["Carrier"] = df_ship["Carrier"].astype(str).str.strip().apply(canonical_carrier)
 df_ship["Total Boxes"] = to_num(df_ship["Total Boxes"])
 df_ship["Boxes per Hour"] = to_num(df_ship["Boxes per Hour"])
 df_ship["Percentage"] = normalize_percent_series(to_num(df_ship["Percentage"]))
 
-# Derived % contribution from totals (this is what you asked for)
 total_boxes_all = float(np.nansum(df_ship["Total Boxes"].values)) if "Total Boxes" in df_ship.columns else 0.0
-if total_boxes_all > 0:
-    df_ship["% of Total Boxes (Derived)"] = (df_ship["Total Boxes"] / total_boxes_all) * 100
-else:
-    df_ship["% of Total Boxes (Derived)"] = np.nan
+df_ship["% of Total Boxes (Derived)"] = (df_ship["Total Boxes"] / total_boxes_all) * 100 if total_boxes_all > 0 else np.nan
 
 # =========================================================
-# carrier (keep as raw + numeric best effort)
+# carrier (best-effort numeric)
 # =========================================================
 col_car2 = find_col(df_carrier, ["CARRIER Service", "Carrier", "CARRIER", "Service"])
 if col_car2:
     df_carrier = df_carrier.rename(columns={col_car2: "Carrier"})
 else:
     df_carrier["Carrier"] = "UNKNOWN"
-df_carrier["Carrier"] = df_carrier["Carrier"].astype(str).str.strip()
+df_carrier["Carrier"] = df_carrier["Carrier"].astype(str).str.strip().apply(canonical_carrier)
 
-# Try to standardize some numeric columns if they exist
 car_total = find_col(df_carrier, ["TOTAL BOXES", "Total Boxes", "Boxes"])
 car_bph = find_col(df_carrier, ["Boxes per Hour", "BOXES per HOUR", "BPH"])
 car_pct = find_col(df_carrier, ["Percentage", "PERCENTAGE", "%"])
+
 if car_total and car_total != "TOTAL BOXES":
     df_carrier = df_carrier.rename(columns={car_total: "TOTAL BOXES"})
 if "TOTAL BOXES" in df_carrier.columns:
     df_carrier["TOTAL BOXES"] = to_num(df_carrier["TOTAL BOXES"])
+
 if car_bph and car_bph != "Boxes per Hour":
     df_carrier = df_carrier.rename(columns={car_bph: "Boxes per Hour"})
 if "Boxes per Hour" in df_carrier.columns:
     df_carrier["Boxes per Hour"] = to_num(df_carrier["Boxes per Hour"])
+
 if car_pct and car_pct != "Percentage":
     df_carrier = df_carrier.rename(columns={car_pct: "Percentage"})
 if "Percentage" in df_carrier.columns:
     df_carrier["Percentage"] = normalize_percent_series(to_num(df_carrier["Percentage"]))
 
 # =========================================================
-# scan (time-based supporting)
+# scan
 # =========================================================
 df_scan = df_scan_raw.copy()
 col_dp_scan = find_col(df_scan, ["Decision Point", "DecisionPoint", "Scanner", "DP"])
 col_exc_type = find_col(df_scan, ["Exception Type", "Exception", "Error Type", "ExceptionType"])
 col_updated = find_col(df_scan, ["Updated", "Updated Time", "Timestamp", "Time", "UpdatedTime"])
+
 if col_dp_scan is None or col_exc_type is None or col_updated is None:
     st.error("scan sheet: missing key columns (Decision Point / Exception Type / Updated).")
     st.write("Columns:", df_scan.columns.tolist())
@@ -522,6 +647,11 @@ df_scan["Date"] = df_scan["Updated"].dt.date
 df_scan["Hour"] = df_scan["Updated"].dt.hour
 df_scan["Shift"] = df_scan["Hour"].apply(lambda x: shift_from_hour(int(x)) if pd.notna(x) else "Unknown")
 df_scan["Area"] = df_scan["Decision Point"].apply(area_from_dp)
+
+# detect tote columns if present
+col_source_tote = find_col(df_scan, ["Source TOTE", "Source Tote", "Source"])
+col_dest_tote = find_col(df_scan, ["Destination TOTE", "Destination Tote", "Destination"])
+col_dup_data = find_col(df_scan, ["Duplicate Data", "Duplicate", "Column S", "S"])
 
 # =========================================================
 # Sidebar filters
@@ -546,7 +676,6 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
 else:
     start_date, end_date = date_min, date_max
 
-# Apply filters
 exc_pct_f = df_exc_pct[df_exc_pct["Area"].isin(areas) & df_exc_pct["Decision Point"].isin(selected_dps)].copy()
 overall_f = df_overall[df_overall["Area"].isin(areas) & df_overall["Decision Point"].isin(selected_dps)].copy()
 scan_f = df_scan[
@@ -557,7 +686,7 @@ scan_f = df_scan[
 ].copy()
 
 # =========================================================
-# KPI CALCULATIONS (more cards + scanner names in KPI)
+# Core Scanner KPI CALCS
 # =========================================================
 noread_col = percent_col_lookup(exc_pct_f, "NOREAD")
 noscan_col = percent_col_lookup(exc_pct_f, "NOSCAN")
@@ -579,16 +708,14 @@ def top_scanner_value(df, col):
 def avg_pct(df, col):
     if not col or col not in df.columns or df.empty:
         return np.nan
-    s = normalize_percent_series(df[col])
-    # Excel-like: blanks ignored
-    return float(np.nanmean(pd.to_numeric(s, errors="coerce"))) if pd.to_numeric(s, errors="coerce").notna().any() else np.nan
+    s = pd.to_numeric(normalize_percent_series(df[col]), errors="coerce")
+    return float(np.nanmean(s)) if s.notna().any() else np.nan
 
 def scanners_affected(df, col):
     if not col or col not in df.columns or df.empty:
         return 0
-    s = pd.to_numeric(normalize_percent_series(df[col]), errors="coerce")
-    # affected = scanners with a real value > 0 (ignore NaN)
-    return int((s.fillna(0) > 0).sum())
+    s = pd.to_numeric(normalize_percent_series(df[col]), errors="coerce").fillna(0)
+    return int((s > 0).sum())
 
 top_noread_dp, top_noread_val = top_scanner_value(exc_pct_f, noread_col)
 top_noscan_dp, top_noscan_val = top_scanner_value(exc_pct_f, noscan_col)
@@ -608,50 +735,42 @@ avg_read = float(np.nanmean(overall_f["Scanner Read %"].values)) if "Scanner Rea
 worst_dp = "—"
 worst_rate = np.nan
 if "Exception Rate %" in overall_f.columns and len(overall_f):
-    worst_row = overall_f.sort_values("Exception Rate %", ascending=False).head(1)
-    if len(worst_row):
-        worst_dp = worst_row["Decision Point"].iloc[0]
-        worst_rate = float(worst_row["Exception Rate %"].iloc[0]) if pd.notna(worst_row["Exception Rate %"].iloc[0]) else np.nan
+    wr = overall_f.sort_values("Exception Rate %", ascending=False).head(1)
+    if len(wr):
+        worst_dp = wr["Decision Point"].iloc[0]
+        worst_rate = float(wr["Exception Rate %"].iloc[0]) if pd.notna(wr["Exception Rate %"].iloc[0]) else np.nan
 
 scanner_count_selected = int(exc_pct_f["Decision Point"].nunique()) if "Decision Point" in exc_pct_f.columns else 0
 areas_count = len(areas)
 
 # =========================================================
-# KPI ROWS (as many as useful, but still clean)
+# TOP: Core Scanner KPIs
 # =========================================================
-# Row 1 (main purpose)
+st.markdown('<div class="section">Core Scanner KPIs</div>', unsafe_allow_html=True)
+
 r1 = st.columns(6)
-r1[0].metric("Top NOREAD %", safe_percent_str(top_noread_val), help=f"Scanner: {top_noread_dp}")
-r1[1].metric("Top NOREAD scanner", top_noread_dp)
-r1[2].metric("Top NOSCAN %", safe_percent_str(top_noscan_val), help=f"Scanner: {top_noscan_dp}")
-r1[3].metric("Top NOSCAN scanner", top_noscan_dp)
-r1[4].metric("Selected Exception Rate", safe_percent_str(site_rate), help="Sum(exceptions) / Sum(scans) from overall pct")
-r1[5].metric("Average Scanner Read %", safe_percent_str(avg_read), help="Average of Scanner Read % from overall pct")
+r1[0].metric("Top NOREAD %", safe_percent_str(top_noread_val), delta=f"Scanner: {top_noread_dp}")
+r1[1].metric("Top NOSCAN %", safe_percent_str(top_noscan_val), delta=f"Scanner: {top_noscan_dp}")
+r1[2].metric("Selected Exception Rate", safe_percent_str(site_rate))
+r1[3].metric("Average Scanner Read %", safe_percent_str(avg_read))
+r1[4].metric("Worst exception rate %", safe_percent_str(worst_rate), delta=f"{worst_dp}")
+r1[5].metric("Selected scanners", f"{scanner_count_selected:,}", delta=f"Areas: {areas_count:,}")
 
-# Row 2 (supporting KPIs)
 r2 = st.columns(6)
-r2[0].metric("Selected scanners", f"{scanner_count_selected:,}")
-r2[1].metric("Selected areas", f"{areas_count:,}")
-r2[2].metric("Total scans (selected)", f"{site_scans:,.0f}")
-r2[3].metric("Total exceptions (selected)", f"{site_excs:,.0f}")
-r2[4].metric("Worst exception rate %", safe_percent_str(worst_rate), help=f"Scanner: {worst_dp}")
-r2[5].metric("Worst scanner", worst_dp)
-
-# Row 3 (NOREAD/NOSCAN coverage)
-r3 = st.columns(6)
-r3[0].metric("Avg NOREAD %", safe_percent_str(avg_noread), help="Average ignoring blanks")
-r3[1].metric("Scanners with NOREAD > 0", f"{aff_noread:,}")
-r3[2].metric("Avg NOSCAN %", safe_percent_str(avg_noscan), help="Average ignoring blanks")
-r3[3].metric("Scanners with NOSCAN > 0", f"{aff_noscan:,}")
-r3[4].metric("Scan date range", f"{start_date} → {end_date}", help="Used in scan tab filtering")
-r3[5].metric("Scan exceptions (filtered)", f"{len(scan_f):,}", help="Row count from scan tab after filters")
+r2[0].metric("Avg NOREAD %", safe_percent_str(avg_noread))
+r2[1].metric("Scanners with NOREAD > 0", f"{aff_noread:,}")
+r2[2].metric("Avg NOSCAN %", safe_percent_str(avg_noscan))
+r2[3].metric("Scanners with NOSCAN > 0", f"{aff_noscan:,}")
+r2[4].metric("Total scans (selected)", f"{site_scans:,.0f}")
+r2[5].metric("Total exceptions (selected)", f"{site_excs:,.0f}")
 
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
 # =========================================================
-# Tabs (workbook order)
+# Tabs (added Executive Dashboard)
 # =========================================================
 tabs = st.tabs([
+    "📊 Executive Dashboard (PowerBI-style)",
     "📌 total",
     "🎯 exception pct (MAIN)",
     "📷 overall pct",
@@ -663,28 +782,171 @@ tabs = st.tabs([
 ])
 
 # =========================================================
-# TAB 1: total
+# TAB 0: Executive Dashboard (PowerBI-style)
 # =========================================================
 with tabs[0]:
+    st.markdown('<div class="section">Executive Dashboard (PowerBI-style)</div>', unsafe_allow_html=True)
+    st.caption("High-level view: last 24h shift split + most affected totes + ship lane % share. Carrier/Area colours preserved.")
+
+    if scan_f.empty:
+        st.warning("No scan rows match filters.")
+    else:
+        # Last 24h window from latest timestamp in filtered scan data
+        tmax = scan_f["Updated"].max()
+        tmin_24 = tmax - pd.Timedelta(hours=24)
+        scan_24 = scan_f[scan_f["Updated"] >= tmin_24].copy()
+        total_24 = len(scan_24)
+
+        # --- Shift donut data ---
+        shift_counts = scan_24["Shift"].value_counts(dropna=False).to_dict()
+        a_cnt = int(shift_counts.get("Shift A (06-14)", 0))
+        b_cnt = int(shift_counts.get("Shift B (14-22)", 0))
+        c_cnt = int(shift_counts.get("Shift C (22-06)", 0))
+
+        a_pct = (a_cnt / total_24) * 100 if total_24 else 0
+        b_pct = (b_cnt / total_24) * 100 if total_24 else 0
+        c_pct = (c_cnt / total_24) * 100 if total_24 else 0
+
+        # --- Duplicate Data (Column S) check ---
+        dup_count_rows = 0
+        dup_unique_values = 0
+        if col_dup_data and col_dup_data in scan_24.columns:
+            s = scan_24[col_dup_data].replace({"": np.nan, "nan": np.nan, "None": np.nan}).dropna()
+            if len(s):
+                dup_mask = s.duplicated(keep=False)
+                dup_vals = s[dup_mask]
+                dup_count_rows = int(dup_vals.shape[0])
+                dup_unique_values = int(dup_vals.nunique())
+
+        # --- Tote issues (most repeated source/destination) ---
+        top_source = ("—", 0)
+        top_dest = ("—", 0)
+        top_any = ("—", 0)
+
+        if col_source_tote and col_source_tote in scan_24.columns:
+            src = scan_24[col_source_tote].replace({"": np.nan, "nan": np.nan, "None": np.nan}).dropna()
+            if len(src):
+                vc = src.value_counts()
+                top_source = (str(vc.index[0]), int(vc.iloc[0]))
+
+        if col_dest_tote and col_dest_tote in scan_24.columns:
+            dst = scan_24[col_dest_tote].replace({"": np.nan, "nan": np.nan, "None": np.nan}).dropna()
+            if len(dst):
+                vc = dst.value_counts()
+                top_dest = (str(vc.index[0]), int(vc.iloc[0]))
+
+        if (col_source_tote in scan_24.columns) or (col_dest_tote in scan_24.columns):
+            parts = []
+            if col_source_tote and col_source_tote in scan_24.columns:
+                parts.append(scan_24[col_source_tote])
+            if col_dest_tote and col_dest_tote in scan_24.columns:
+                parts.append(scan_24[col_dest_tote])
+            all_totes = pd.concat(parts, ignore_index=True).replace({"": np.nan, "nan": np.nan, "None": np.nan}).dropna()
+            if len(all_totes):
+                vc = all_totes.value_counts()
+                top_any = (str(vc.index[0]), int(vc.iloc[0]))
+
+        # --- Shipping lane % share (derived) for current carrier filter ---
+        ship_total = float(np.nansum(df_ship["Total Boxes"].values)) if "Total Boxes" in df_ship.columns else 0.0
+        ship_df = df_ship.copy()
+        ship_df["% share (Derived)"] = (ship_df["Total Boxes"] / ship_total) * 100 if ship_total > 0 else np.nan
+
+        # KPI row (clean)
+        k = st.columns(6)
+        k[0].metric("Last 24h exceptions", f"{total_24:,}", delta=f"{tmin_24:%d %b %H:%M} → {tmax:%d %b %H:%M}")
+        k[1].metric("Shift A %", safe_percent_str(a_pct), delta=f"{a_cnt:,} rows")
+        k[2].metric("Shift B %", safe_percent_str(b_pct), delta=f"{b_cnt:,} rows")
+        k[3].metric("Shift C %", safe_percent_str(c_pct), delta=f"{c_cnt:,} rows")
+        k[4].metric("Column S duplicate rows", f"{dup_count_rows:,}", delta=f"Unique dup values: {dup_unique_values:,}")
+        k[5].metric("Most affected tote", f"{top_any[0]}", delta=f"{top_any[1]:,} rows")
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # Row 1: Shift donut + Ship lane % share (brand colours preserved)
+        c1, c2 = st.columns(2)
+
+        shift_df = pd.DataFrame({
+            "Shift": ["Shift A (06-14)", "Shift B (14-22)", "Shift C (22-06)"],
+            "Count": [a_cnt, b_cnt, c_cnt]
+        })
+        donut = go.Figure(data=[go.Pie(labels=shift_df["Shift"], values=shift_df["Count"], hole=0.58, textinfo="percent+label")])
+        c1.plotly_chart(
+            fig_style(donut, title="Last 24h: Shift % split", subtitle="Share of exceptions by shift."),
+            use_container_width=True
+        )
+
+        # Ship lane % share chart (carrier brand colours preserved)
+        if ship_df["% share (Derived)"].notna().any():
+            top_lanes_pct = ship_df.sort_values("% share (Derived)", ascending=False).head(12)
+            fig_lane_pct = px.bar(
+                top_lanes_pct,
+                x="Lane",
+                y="% share (Derived)",
+                color="Carrier",
+                text="% share (Derived)",
+                color_discrete_map=BRAND_COLORS  # KEEP brand colours
+            )
+            fig_lane_pct.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
+            fig_lane_pct.update_layout(xaxis_tickangle=-25)
+            c2.plotly_chart(
+                fig_style(fig_lane_pct,
+                          title="Top ship lanes by % share (Derived)",
+                          subtitle="Lane contribution % (not boxes). Brand carrier colours preserved.",
+                          x_title="Lane", y_title="% share"),
+                use_container_width=True
+            )
+        else:
+            c2.info("Shipping lanes: unable to calculate % share (Derived).")
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # Row 2: Most repeated Source/Destination tote + Most affected totes (severity colours)
+        d1, d2 = st.columns(2)
+
+        # KPI cards for source/destination tote
+        kk = d1.columns(2)
+        kk[0].metric("Top Source tote", top_source[0], delta=f"{top_source[1]:,} rows")
+        kk[1].metric("Top Destination tote", top_dest[0], delta=f"{top_dest[1]:,} rows")
+
+        # Bar: top totes (combined source + destination) with severity colours
+        if top_any[0] != "—":
+            all_totes_vc = all_totes.value_counts().head(15).reset_index()
+            all_totes_vc.columns = ["Tote", "Rows"]
+            all_totes_vc = all_totes_vc.sort_values("Rows", ascending=False)
+
+            fig_totes = px.bar(all_totes_vc, x="Tote", y="Rows", text="Rows")
+            fig_totes.update_traces(texttemplate="%{text:,}", textposition="outside", cliponaxis=False)
+            fig_totes.update_layout(xaxis_tickangle=-25)
+            fig_totes = apply_severity_bar_colors(fig_totes, all_totes_vc["Rows"].tolist())
+
+            d2.plotly_chart(
+                fig_style(fig_totes,
+                          title="Most affected totes (Source + Destination)",
+                          subtitle="Severity colours: red=highest repeated.",
+                          x_title="Tote", y_title="Rows"),
+                use_container_width=True
+            )
+        else:
+            d2.info("No tote columns found (Source TOTE / Destination TOTE).")
+
+        with st.expander("Show last 24h tote table (top 200 rows)"):
+            show_cols = [c for c in ["Updated", "Decision Point", "Exception Type", col_source_tote, col_dest_tote, col_dup_data] if c and c in scan_24.columns]
+            st.dataframe(scan_24[show_cols].head(200), use_container_width=True)
+
+# =========================================================
+# TAB 1: total
+# =========================================================
+with tabs[1]:
     st.markdown('<div class="section">total</div>', unsafe_allow_html=True)
     st.caption("High-level totals from your “total” sheet.")
-    a = first_number_in_total(df_total_num, 0)
-    b = first_number_in_total(df_total_num, 1)
-    c = first_number_in_total(df_total_num, 2)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Value 1", f"{a:,.0f}")
-    c2.metric("Value 2", f"{b:,.0f}")
-    c3.metric("Value 3", f"{c:,.2f}" if pd.notna(c) else "—")
-
     st.dataframe(df_total, use_container_width=True)
 
 # =========================================================
 # TAB 2: exception pct (MAIN)
 # =========================================================
-with tabs[1]:
+with tabs[2]:
     st.markdown('<div class="section">exception pct (main focus)</div>', unsafe_allow_html=True)
-    st.caption("Main use: quickly identify scanners with high NOREAD% and NOSCAN%, and rank scanners by any exception type.")
+    st.caption("Identify scanners with high NOREAD% and NOSCAN%, and rank scanners by any exception type.")
 
     if exc_pct_f.empty:
         st.warning("No rows match the selected Area/Decision Point filters.")
@@ -693,9 +955,7 @@ with tabs[1]:
         if not pct_cols2:
             st.warning("No exception % columns found in exception pct sheet.")
         else:
-            # 1) NOREAD & NOSCAN charts (TOP only, no bottom)
-            st.markdown("### 1) NOREAD & NOSCAN scanner ranking (highest → lowest)")
-
+            st.markdown("### NOREAD & NOSCAN scanner ranking (highest → lowest)")
             colA, colB = st.columns(2)
 
             def show_top_rank(container, label):
@@ -703,21 +963,19 @@ with tabs[1]:
                 if not exc_col:
                     container.warning(f"{label} column not found.")
                     return
-
                 top_df, full_rank = rank_scanners_by_exception_pct(exc_pct_f, exc_col, ignore_blanks, rank_n)
-
                 fig = px.bar(top_df, x="Decision Point", y="Rate %", text="Rate %")
                 fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
                 fig.update_layout(xaxis_tickangle=-25)
+                fig = apply_severity_bar_colors(fig, top_df["Rate %"].tolist())  # severity colours
                 container.plotly_chart(
                     fig_style(fig,
                               title=f"Top {rank_n} scanners by {label} %",
-                              subtitle="Worst scanners first. Use this for action/escalation.",
+                              subtitle="Worst scanners first (severity colours).",
                               x_title="Scanner (Decision Point)",
                               y_title=f"{label} %"),
                     use_container_width=True
                 )
-
                 with container.expander(f"Show full ranking table ({label})"):
                     container.dataframe(full_rank, use_container_width=True)
 
@@ -726,18 +984,13 @@ with tabs[1]:
 
             st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-            # 2) Pick any exception type and show top ranking
-            st.markdown("### 2) Pick an exception type and see scanners ranked (highest → lowest)")
-
+            st.markdown("### Pick an exception type and see scanners ranked")
             display_map = {c: str(c).replace("%", "").strip().upper() for c in pct_cols2}
             reverse_map = {v: k for k, v in display_map.items()}
             default_choice = "NOREAD" if "NOREAD" in reverse_map else sorted(reverse_map.keys())[0]
 
-            exc_choice = st.selectbox(
-                "Exception Type",
-                options=sorted(reverse_map.keys()),
-                index=sorted(reverse_map.keys()).index(default_choice),
-            )
+            exc_choice = st.selectbox("Exception Type", options=sorted(reverse_map.keys()),
+                                      index=sorted(reverse_map.keys()).index(default_choice))
 
             exc_col = reverse_map[exc_choice]
             top_df, full_rank = rank_scanners_by_exception_pct(exc_pct_f, exc_col, ignore_blanks, rank_n)
@@ -745,18 +998,14 @@ with tabs[1]:
             if full_rank.empty:
                 st.warning("No data for selected exception type.")
             else:
-                h1, h2, h3 = st.columns(3)
-                h1.metric("Selected exception", exc_choice)
-                h2.metric("Highest scanner", f"{full_rank.iloc[0]['Decision Point']}", help=f"{full_rank.iloc[0]['Rate %']:.2f}%")
-                h3.metric("Highest %", f"{full_rank.iloc[0]['Rate %']:.2f}%")
-
                 fig_any = px.bar(top_df, x="Decision Point", y="Rate %", text="Rate %")
                 fig_any.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
                 fig_any.update_layout(xaxis_tickangle=-25)
+                fig_any = apply_severity_bar_colors(fig_any, top_df["Rate %"].tolist())  # severity colours
                 st.plotly_chart(
                     fig_style(fig_any,
                               title=f"Top {rank_n} scanners by {exc_choice} %",
-                              subtitle="Highest to lowest (ranking for selected exception type).",
+                              subtitle="Highest to lowest (severity colours).",
                               x_title="Scanner (Decision Point)",
                               y_title="Rate %"),
                     use_container_width=True
@@ -764,32 +1013,25 @@ with tabs[1]:
 
             st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-            # 3) Summary across exception types
-            st.markdown("### 3) Exception type summary (average %, blanks ignored)")
-
-            long = exc_pct_f.melt(
-                id_vars=["Decision Point", "Area"],
-                value_vars=pct_cols2,
-                var_name="Exception Type",
-                value_name="Rate %"
-            )
+            st.markdown("### Exception type summary (average %, blanks ignored)")
+            long = exc_pct_f.melt(id_vars=["Decision Point", "Area"], value_vars=pct_cols2,
+                                 var_name="Exception Type", value_name="Rate %")
             long["Exception Type"] = long["Exception Type"].astype(str).str.replace("%", "", regex=False).str.strip().str.upper()
             long["Rate %"] = normalize_percent_series(pd.to_numeric(long["Rate %"], errors="coerce"))
 
             top_types = (
-                long.groupby("Exception Type", as_index=False)["Rate %"]
-                .mean()  # ignores NaN
-                .sort_values("Rate %", ascending=False)
-                .head(top_n)
+                long.groupby("Exception Type", as_index=False)["Rate %"].mean()
+                .sort_values("Rate %", ascending=False).head(top_n)
             )
 
             fig_types = px.bar(top_types, x="Exception Type", y="Rate %", text="Rate %")
             fig_types.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
             fig_types.update_layout(xaxis_tickangle=-25)
+            fig_types = apply_severity_bar_colors(fig_types, top_types["Rate %"].tolist())  # severity colours
             st.plotly_chart(
                 fig_style(fig_types,
                           title=f"Top {top_n} exception types by average %",
-                          subtitle="Average is calculated only where values exist (blanks ignored).",
+                          subtitle="Severity colours: red=highest average.",
                           x_title="Exception Type",
                           y_title="Average Rate %"),
                 use_container_width=True
@@ -798,92 +1040,73 @@ with tabs[1]:
             st.dataframe(exc_pct_f.drop(columns=["Area"], errors="ignore"), use_container_width=True)
 
 # =========================================================
-# TAB 3: overall pct
+# TAB 3: overall pct (Area colours preserved)
 # =========================================================
-with tabs[2]:
+with tabs[3]:
     st.markdown('<div class="section">overall pct</div>', unsafe_allow_html=True)
-    st.caption("Overall scanner statistics: exception rate %, scanner read %, and volume impact.")
+    st.caption("Overall scanner statistics: exception rate %, scanner read %, and volume impact. (Area colours preserved.)")
 
     if overall_f.empty:
         st.warning("No scanner rows match filters.")
     else:
         c1, c2 = st.columns(2)
-
         top_rate = overall_f.sort_values("Exception Rate %", ascending=False).head(top_n)
+
+        # KEEP Area colours (do not apply severity colours here)
         fig_rate = px.bar(top_rate, x="Decision Point", y="Exception Rate %", text="Exception Rate %", color="Area")
         fig_rate.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
         fig_rate.update_layout(xaxis_tickangle=-30)
-        c1.plotly_chart(
-            fig_style(fig_rate,
-                      title=f"Top {top_n} scanners by exception rate %",
-                      subtitle="High-level health (rate-based).",
-                      x_title="Scanner",
-                      y_title="Exception Rate %"),
-            use_container_width=True,
-        )
+        c1.plotly_chart(fig_style(fig_rate, title=f"Top {top_n} scanners by exception rate % (Area colours)",
+                                  subtitle="Area colours preserved.",
+                                  x_title="Scanner", y_title="Exception Rate %"),
+                        use_container_width=True)
 
-        fig_scatter = px.scatter(
-            overall_f,
-            x="Total Scans",
-            y="Exception Rate %",
-            size="Total Exceptions",
-            color="Area",
-            hover_name="Decision Point",
-        )
-        c2.plotly_chart(
-            fig_style(fig_scatter,
-                      title="Rate vs volume",
-                      subtitle="High rate + high volume = biggest operational impact.",
-                      x_title="Total Scans",
-                      y_title="Exception Rate %"),
-            use_container_width=True,
-        )
+        # KEEP Area colours
+        fig_scatter = px.scatter(overall_f, x="Total Scans", y="Exception Rate %",
+                                 size="Total Exceptions", color="Area", hover_name="Decision Point")
+        c2.plotly_chart(fig_style(fig_scatter, title="Impact view: Rate vs Volume (Area colours)",
+                                  subtitle="High rate + high volume = biggest impact.",
+                                  x_title="Total Scans", y_title="Exception Rate %"),
+                        use_container_width=True)
 
-        # Read % chart if present
+        # Read % (Area colours)
         if "Scanner Read %" in overall_f.columns and overall_f["Scanner Read %"].notna().any():
             top_read_bad = overall_f.sort_values("Scanner Read %", ascending=True).head(top_n)
             fig_read = px.bar(top_read_bad, x="Decision Point", y="Scanner Read %", text="Scanner Read %", color="Area")
             fig_read.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
             fig_read.update_layout(xaxis_tickangle=-30)
-            st.plotly_chart(
-                fig_style(fig_read,
-                          title=f"Lowest {top_n} scanners by Scanner Read %",
-                          subtitle="Low read % usually means scanning / label / process problems.",
-                          x_title="Scanner",
-                          y_title="Scanner Read %"),
-                use_container_width=True,
-            )
+            st.plotly_chart(fig_style(fig_read, title=f"Lowest {top_n} scanners by Scanner Read % (Area colours)",
+                                      subtitle="Area colours preserved.",
+                                      x_title="Scanner", y_title="Scanner Read %"),
+                            use_container_width=True)
 
         show_cols = ["Area", "Decision Point", "Total Scans", "Total Exceptions", "Exception Rate %", "Scanner Read %"]
         show_cols = [c for c in show_cols if c in overall_f.columns]
         st.dataframe(overall_f[show_cols], use_container_width=True)
 
 # =========================================================
-# TAB 4: shipping lanes (NOW: counts + %)
+# TAB 4: shipping lanes (Carrier brand colours preserved)
 # =========================================================
-with tabs[3]:
+with tabs[4]:
     st.markdown('<div class="section">shipping lanes</div>', unsafe_allow_html=True)
-    st.caption("Lane throughput and contribution. This page shows both counts (Total Boxes) and % contribution (derived).")
+    st.caption("Lane throughput and contribution. Carrier brand colours preserved.")
 
     carriers = sorted(df_ship["Carrier"].dropna().unique().tolist()) if "Carrier" in df_ship.columns else []
     pick_carriers = st.multiselect("Carrier", carriers, default=carriers, key="ship_carrier") if carriers else []
     sf = df_ship[df_ship["Carrier"].isin(pick_carriers)].copy() if carriers else df_ship.copy()
 
-    # Recompute derived % on the filtered set (important!)
     total_boxes_filtered = float(np.nansum(sf["Total Boxes"].values)) if "Total Boxes" in sf.columns else 0.0
-    if total_boxes_filtered > 0:
-        sf["% of Total Boxes (Derived)"] = (sf["Total Boxes"] / total_boxes_filtered) * 100
-    else:
-        sf["% of Total Boxes (Derived)"] = np.nan
+    sf["% of Total Boxes (Derived)"] = (sf["Total Boxes"] / total_boxes_filtered) * 100 if total_boxes_filtered > 0 else np.nan
 
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("Lanes", f"{sf['Lane'].nunique():,}" if "Lane" in sf.columns else "—")
     k2.metric("Carriers", f"{sf['Carrier'].nunique():,}" if "Carrier" in sf.columns else "—")
     k3.metric("Total Boxes", f"{np.nansum(sf['Total Boxes'].values):,.0f}" if "Total Boxes" in sf.columns else "—")
     k4.metric("Total Boxes/Hour", f"{np.nansum(sf['Boxes per Hour'].values):,.2f}" if "Boxes per Hour" in sf.columns else "—")
+
     top_lane = "—"
     top_lane_pct = np.nan
-    if "Lane" in sf.columns and "% of Total Boxes (Derived)" in sf.columns and sf["% of Total Boxes (Derived)"].notna().any():
+    if "Lane" in sf.columns and sf["% of Total Boxes (Derived)"].notna().any():
         t = sf.sort_values("% of Total Boxes (Derived)", ascending=False).head(1)
         top_lane = t["Lane"].iloc[0]
         top_lane_pct = float(t["% of Total Boxes (Derived)"].iloc[0])
@@ -894,146 +1117,245 @@ with tabs[3]:
 
     c1, c2 = st.columns(2)
 
-    # A) Top lanes by total boxes (count)
     if "Total Boxes" in sf.columns and "Lane" in sf.columns:
         top_vol = sf.sort_values("Total Boxes", ascending=False).head(top_n)
         fig_vol = px.bar(
             top_vol,
             x="Lane",
             y="Total Boxes",
-            color="Carrier" if "Carrier" in sf.columns else None,
+            color="Carrier",
             text="Total Boxes",
+            color_discrete_map=BRAND_COLORS  # KEEP brand colours
         )
         fig_vol.update_traces(texttemplate="%{text:,.0f}", textposition="outside", cliponaxis=False)
         fig_vol.update_layout(xaxis_tickangle=-25)
-        c1.plotly_chart(
-            fig_style(fig_vol,
-                      title=f"Top {top_n} lanes by total boxes (count)",
-                      subtitle="Raw volume per lane (filtered set).",
-                      x_title="Lane",
-                      y_title="Total Boxes"),
-            use_container_width=True
-        )
+        c1.plotly_chart(fig_style(fig_vol, title=f"Top {top_n} lanes by total boxes (brand colours)",
+                                  subtitle="Brand colours preserved for carriers.",
+                                  x_title="Lane", y_title="Total Boxes"),
+                        use_container_width=True)
 
-    # B) Top lanes by derived % share
     if "% of Total Boxes (Derived)" in sf.columns and "Lane" in sf.columns:
         top_pct = sf.sort_values("% of Total Boxes (Derived)", ascending=False).head(top_n)
         fig_pct = px.bar(
             top_pct,
             x="Lane",
             y="% of Total Boxes (Derived)",
-            color="Carrier" if "Carrier" in sf.columns else None,
+            color="Carrier",
             text="% of Total Boxes (Derived)",
+            color_discrete_map=BRAND_COLORS  # KEEP brand colours
         )
         fig_pct.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
         fig_pct.update_layout(xaxis_tickangle=-25)
-        c2.plotly_chart(
-            fig_style(fig_pct,
-                      title=f"Top {top_n} lanes by % share (derived)",
-                      subtitle="Each lane contribution % within the filtered set.",
-                      x_title="Lane",
-                      y_title="% of Total Boxes"),
-            use_container_width=True
-        )
-
-    # C) Throughput view
-    if "Boxes per Hour" in sf.columns and "Lane" in sf.columns and sf["Boxes per Hour"].notna().any():
-        top_hr = sf.sort_values("Boxes per Hour", ascending=False).head(top_n)
-        fig_hr = px.bar(top_hr, x="Lane", y="Boxes per Hour", color="Carrier" if "Carrier" in sf.columns else None, text="Boxes per Hour")
-        fig_hr.update_traces(texttemplate="%{text:.2f}", textposition="outside", cliponaxis=False)
-        fig_hr.update_layout(xaxis_tickangle=-25)
-        st.plotly_chart(
-            fig_style(fig_hr,
-                      title=f"Top {top_n} lanes by boxes per hour",
-                      subtitle="Throughput view (higher = faster).",
-                      x_title="Lane",
-                      y_title="Boxes per Hour"),
-            use_container_width=True
-        )
+        c2.plotly_chart(fig_style(fig_pct, title=f"Top {top_n} lanes by % share (derived) (brand colours)",
+                                  subtitle="Brand colours preserved for carriers.",
+                                  x_title="Lane", y_title="% of Total Boxes"),
+                        use_container_width=True)
 
     st.dataframe(sf, use_container_width=True)
 
 # =========================================================
-# TAB 5: carrier
+# TAB 5: carrier (Carrier brand colours preserved)
 # =========================================================
-with tabs[4]:
+with tabs[5]:
     st.markdown('<div class="section">carrier</div>', unsafe_allow_html=True)
-    st.caption("Carrier summary (supporting).")
+    st.caption("Carrier summary with brand colours preserved.")
 
     if "TOTAL BOXES" in df_carrier.columns and df_carrier["TOTAL BOXES"].notna().any():
         c1, c2 = st.columns(2)
-        pie = go.Figure(data=[go.Pie(labels=df_carrier["Carrier"], values=df_carrier["TOTAL BOXES"], hole=0.55, textinfo="percent+label")])
-        c1.plotly_chart(fig_style(pie, title="Share of total boxes by carrier", subtitle="Volume split."), use_container_width=True)
 
-        bar = px.bar(df_carrier.sort_values("TOTAL BOXES", ascending=False), x="Carrier", y="TOTAL BOXES", text="TOTAL BOXES")
+        labels = df_carrier["Carrier"].astype(str).tolist()
+        values = df_carrier["TOTAL BOXES"].tolist()
+        pie_colors = [BRAND_COLORS.get(canonical_carrier(l), None) for l in labels]
+
+        pie = go.Figure(
+            data=[go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.55,
+                textinfo="percent+label",
+                marker=dict(colors=pie_colors)
+            )]
+        )
+        c1.plotly_chart(fig_style(pie, title="Share of total boxes by carrier (brand colours)", subtitle="Volume split."),
+                        use_container_width=True)
+
+        bar_df = df_carrier.sort_values("TOTAL BOXES", ascending=False).copy()
+        bar = px.bar(
+            bar_df,
+            x="Carrier",
+            y="TOTAL BOXES",
+            text="TOTAL BOXES",
+            color="Carrier",
+            color_discrete_map=BRAND_COLORS
+        )
         bar.update_traces(texttemplate="%{text:,.0f}", textposition="outside", cliponaxis=False)
-        c2.plotly_chart(fig_style(bar, title="Total boxes by carrier", subtitle="Raw volume per carrier.", x_title="Carrier", y_title="Total Boxes"), use_container_width=True)
+        bar.update_layout(showlegend=False)
+        c2.plotly_chart(fig_style(bar, title="Total boxes by carrier (brand colours)", subtitle="Raw volume.",
+                                  x_title="Carrier", y_title="Total Boxes"),
+                        use_container_width=True)
 
     if "Boxes per Hour" in df_carrier.columns and df_carrier["Boxes per Hour"].notna().any():
-        bph = px.bar(df_carrier.sort_values("Boxes per Hour", ascending=False), x="Carrier", y="Boxes per Hour", text="Boxes per Hour")
+        bph_df = df_carrier.sort_values("Boxes per Hour", ascending=False).copy()
+        bph = px.bar(
+            bph_df,
+            x="Carrier",
+            y="Boxes per Hour",
+            text="Boxes per Hour",
+            color="Carrier",
+            color_discrete_map=BRAND_COLORS
+        )
         bph.update_traces(texttemplate="%{text:.2f}", textposition="outside", cliponaxis=False)
-        st.plotly_chart(fig_style(bph, title="Boxes per hour by carrier", subtitle="Throughput view.", x_title="Carrier", y_title="Boxes per Hour"), use_container_width=True)
+        bph.update_layout(showlegend=False)
+        st.plotly_chart(fig_style(bph, title="Boxes per hour by carrier (brand colours)", subtitle="Throughput view.",
+                                  x_title="Carrier", y_title="Boxes per Hour"),
+                        use_container_width=True)
 
     st.dataframe(df_carrier, use_container_width=True)
 
 # =========================================================
-# TAB 6: scan
+# TAB 6: scan (24h pulse stays here too)
 # =========================================================
-with tabs[5]:
+with tabs[6]:
     st.markdown('<div class="section">scan</div>', unsafe_allow_html=True)
-    st.caption("Time-based view (counts). Use this to see when exceptions spike by hour/shift.")
+    st.caption("Time-based view (counts). Includes the 24h Exception Pulse section.")
 
     if scan_f.empty:
         st.warning("No scan rows match filters.")
     else:
+        st.markdown('<div class="section">24h Exception Pulse (KPIs)</div>', unsafe_allow_html=True)
+        st.caption("Last 24 hours is based on the latest timestamp in your filtered scan data.")
+
+        tmax = scan_f["Updated"].max()
+        tmin_24 = tmax - pd.Timedelta(hours=24)
+        scan_24 = scan_f[scan_f["Updated"] >= tmin_24].copy()
+        total_24 = len(scan_24)
+
+        if total_24 == 0:
+            st.warning("No exceptions in the last 24 hours within current filters.")
+        else:
+            shift_counts = scan_24["Shift"].value_counts(dropna=False).to_dict()
+            a_cnt = int(shift_counts.get("Shift A (06-14)", 0))
+            b_cnt = int(shift_counts.get("Shift B (14-22)", 0))
+            c_cnt = int(shift_counts.get("Shift C (22-06)", 0))
+
+            a_pct = (a_cnt / total_24) * 100
+            b_pct = (b_cnt / total_24) * 100
+            c_pct = (c_cnt / total_24) * 100
+
+            type_tbl = (
+                scan_24["Exception Type"].value_counts()
+                .rename_axis("Exception Type")
+                .reset_index(name="Count")
+            )
+            type_tbl["%"] = (type_tbl["Count"] / total_24) * 100
+
+            # Column S duplicate check
+            dup_count_rows = 0
+            dup_unique_values = 0
+            dup_examples = pd.DataFrame()
+            if col_dup_data and col_dup_data in scan_24.columns:
+                colS_series = scan_24[col_dup_data].copy()
+                colS_series = colS_series.replace({"": np.nan, "nan": np.nan, "None": np.nan})
+                colS_nonnull = colS_series.dropna()
+                if len(colS_nonnull) > 0:
+                    dup_mask = colS_nonnull.duplicated(keep=False)
+                    dup_vals = colS_nonnull[dup_mask]
+                    dup_count_rows = int(dup_vals.shape[0])
+                    dup_unique_values = int(dup_vals.nunique())
+                    dup_examples = (
+                        dup_vals.value_counts()
+                        .reset_index()
+                        .rename(columns={"index": "Value", col_dup_data: "Rows"})
+                    )
+                    dup_examples.columns = ["Value", "Rows"]
+                    dup_examples = dup_examples.head(15)
+
+            k = st.columns(6)
+            k[0].metric("Overall 24h exceptions %", "100.00%", delta=f"{total_24:,} rows")
+            k[1].metric("Shift A by %", safe_percent_str(a_pct), delta=f"{a_cnt:,} rows")
+            k[2].metric("Shift B by %", safe_percent_str(b_pct), delta=f"{b_cnt:,} rows")
+            k[3].metric("Shift C by %", safe_percent_str(c_pct), delta=f"{c_cnt:,} rows")
+            k[4].metric("Column S duplicate rows", f"{dup_count_rows:,}")
+            k[5].metric("Column S duplicated values", f"{dup_unique_values:,}")
+
+            st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+            # Exception types by % (severity colours)
+            top_types = type_tbl.head(15).copy()
+            top_types = top_types.sort_values("%", ascending=False)
+
+            fig_types = px.bar(top_types, x="Exception Type", y="%", text="%")
+            fig_types.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
+            fig_types.update_layout(xaxis_tickangle=-25)
+            fig_types = apply_severity_bar_colors(fig_types, top_types["%"].tolist())
+            st.plotly_chart(
+                fig_style(fig_types,
+                          title="Last 24h: exception types by % (severity colours)",
+                          subtitle="Red=highest share, green=low, grey=near-zero.",
+                          x_title="Exception Type", y_title="% of exceptions"),
+                use_container_width=True
+            )
+
+            with st.expander("📋 List of Exception Type by % (Last 24h)"):
+                st.dataframe(type_tbl, use_container_width=True)
+
+            if col_dup_data and col_dup_data in scan_24.columns:
+                with st.expander("🧾 Column S duplicate check details"):
+                    if dup_count_rows == 0:
+                        st.success(f"No duplicates found in Column S ('{col_dup_data}') excluding blanks.")
+                    else:
+                        st.warning(f"Found {dup_count_rows:,} duplicate rows across {dup_unique_values:,} values in Column S ('{col_dup_data}').")
+                        st.dataframe(dup_examples, use_container_width=True)
+
+            st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # Supporting scan charts (counts) with severity colours
         c1, c2 = st.columns(2)
 
         dp_counts = scan_f["Decision Point"].value_counts().head(top_n).reset_index()
         dp_counts.columns = ["Decision Point", "Exceptions"]
-        fig_dp = px.bar(dp_counts, x="Decision Point", y="Exceptions", text="Exceptions", color="Exceptions")
+        dp_counts = dp_counts.sort_values("Exceptions", ascending=False)
+        fig_dp = px.bar(dp_counts, x="Decision Point", y="Exceptions", text="Exceptions")
         fig_dp.update_traces(textposition="outside", cliponaxis=False)
         fig_dp.update_layout(xaxis_tickangle=-30)
-        c1.plotly_chart(fig_style(fig_dp, title=f"Top {top_n} scanners by exception volume", subtitle="Count view from scan tab (filtered).", x_title="Scanner", y_title="Exceptions"), use_container_width=True)
+        fig_dp = apply_severity_bar_colors(fig_dp, dp_counts["Exceptions"].tolist())
+        c1.plotly_chart(fig_style(fig_dp, title=f"Top {top_n} scanners by exception volume (severity colours)",
+                                  subtitle="Count view (filtered).",
+                                  x_title="Scanner", y_title="Exceptions"),
+                        use_container_width=True)
 
         type_counts = scan_f["Exception Type"].value_counts().head(top_n).reset_index()
         type_counts.columns = ["Exception Type", "Exceptions"]
-        fig_type = px.bar(type_counts, x="Exception Type", y="Exceptions", text="Exceptions", color="Exceptions")
+        type_counts = type_counts.sort_values("Exceptions", ascending=False)
+        fig_type = px.bar(type_counts, x="Exception Type", y="Exceptions", text="Exceptions")
         fig_type.update_traces(textposition="outside", cliponaxis=False)
         fig_type.update_layout(xaxis_tickangle=-25)
-        c2.plotly_chart(fig_style(fig_type, title=f"Top {top_n} exception types", subtitle="Count view from scan tab (filtered).", x_title="Exception Type", y_title="Exceptions"), use_container_width=True)
-
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        fig_type = apply_severity_bar_colors(fig_type, type_counts["Exceptions"].tolist())
+        c2.plotly_chart(fig_style(fig_type, title=f"Top {top_n} exception types (count) (severity colours)",
+                                  subtitle="Count view (filtered).",
+                                  x_title="Exception Type", y_title="Exceptions"),
+                        use_container_width=True)
 
         hour_counts = scan_f.groupby("Hour").size().reset_index(name="Exceptions").sort_values("Hour")
         fig_hour = px.area(hour_counts, x="Hour", y="Exceptions")
-        st.plotly_chart(fig_style(fig_hour, title="Exceptions by hour", subtitle="Time profile for spikes.", x_title="Hour of day", y_title="Exceptions"), use_container_width=True)
-
-        # Heatmap (scanner vs type)
-        pivot = (
-            scan_f.groupby(["Decision Point", "Exception Type"]).size()
-            .reset_index(name="Count")
-            .pivot_table(index="Decision Point", columns="Exception Type", values="Count", aggfunc="sum")
-            .fillna(0)
-        )
-        top_rows = scan_f["Decision Point"].value_counts().head(min(top_n, 25)).index
-        pivot = pivot.loc[top_rows]
-        fig_hm = px.imshow(pivot, aspect="auto")
-        st.plotly_chart(fig_style(fig_hm, title="Heatmap: exceptions by scanner vs type (counts)", subtitle="From scan tab (filtered time window).", x_title="Exception Type", y_title="Scanner"), use_container_width=True)
+        st.plotly_chart(fig_style(fig_hour, title="Exceptions by hour", subtitle="Time profile for spikes.",
+                                  x_title="Hour of day", y_title="Exceptions"),
+                        use_container_width=True)
 
         st.dataframe(scan_f.head(400), use_container_width=True)
 
 # =========================================================
-# TAB 7: errors (raw support)
+# TAB 7: errors
 # =========================================================
-with tabs[6]:
+with tabs[7]:
     st.markdown('<div class="section">errors</div>', unsafe_allow_html=True)
     st.caption("Supporting view: raw errors sheet.")
     st.dataframe(df_errors, use_container_width=True)
 
 # =========================================================
-# TAB 8: mission error (raw support)
+# TAB 8: mission error
 # =========================================================
-with tabs[7]:
+with tabs[8]:
     st.markdown('<div class="section">mission error</div>', unsafe_allow_html=True)
     st.caption("Supporting view: raw mission error sheet.")
     st.dataframe(df_mission, use_container_width=True)
@@ -1043,7 +1365,15 @@ with tabs[7]:
 # =========================================================
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 with st.expander("⬇️ Quick Export (filtered)"):
-    st.download_button("Download filtered exception pct (CSV)", exc_pct_f.to_csv(index=False).encode("utf-8"), "filtered_exception_pct.csv", "text/csv")
-    st.download_button("Download filtered overall pct (CSV)", overall_f.to_csv(index=False).encode("utf-8"), "filtered_overall_pct.csv", "text/csv")
-    st.download_button("Download filtered scan (CSV)", scan_f.to_csv(index=False).encode("utf-8"), "filtered_scan.csv", "text/csv")
-    st.download_button("Download filtered shipping lanes (CSV)", df_ship.to_csv(index=False).encode("utf-8"), "shipping_lanes_with_percent.csv", "text/csv")
+    st.download_button("Download filtered exception pct (CSV)",
+                       exc_pct_f.to_csv(index=False).encode("utf-8"),
+                       "filtered_exception_pct.csv", "text/csv")
+    st.download_button("Download filtered overall pct (CSV)",
+                       overall_f.to_csv(index=False).encode("utf-8"),
+                       "filtered_overall_pct.csv", "text/csv")
+    st.download_button("Download filtered scan (CSV)",
+                       scan_f.to_csv(index=False).encode("utf-8"),
+                       "filtered_scan.csv", "text/csv")
+    st.download_button("Download shipping lanes with % (CSV)",
+                       df_ship.to_csv(index=False).encode("utf-8"),
+                       "shipping_lanes_with_percent.csv", "text/csv")
