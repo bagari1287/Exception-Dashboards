@@ -6,7 +6,7 @@
 # 1) KEEP carrier brand colours (EVRI/DPD/Parcel Force) + KEEP Area colours (do not change)
 # 2) For ALL OTHER charts: use severity colour order (high -> low)
 #    Red -> Orange -> Yellow -> Light Green -> Green -> Grey
-# 3) Add Executive Dashboard (PowerBI-style) tab:
+# 3) Add Executive Dashboard tab:
 #    - Donut chart for Shift % (Last 24h)
 #    - Replace "Last 24h: exception type share %" chart with:
 #        ✅ Most affected tote (Source/Destination) + top source tote + top destination tote
@@ -72,7 +72,15 @@ color: rgb(33 31 31);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-
+/*
+.st-emotion-cache-19k9of3 {
+    font-family: inherit;
+    font-size: 1.2em;
+    color: inherit;
+    max-width: 100%;
+    overflow-wrap: break-word;
+}
+*/
     /* --- 3D Magic Starts Here --- */
     background: linear-gradient(145deg, #ffffff, #e0e0e0);
     box-shadow:
@@ -454,8 +462,8 @@ st.markdown(
     f"""
     <div class="hero">
       <div>
-        <h1 style="margin:0;">🐾 WES Ops Dashboard</h1>
-        <div class="subtitle">Core Scanner KPIs + Executive PowerBI-style dashboard</div>
+        <h1 style="margin:0;">🐾 PETS WES Ops Dashboard</h1>
+        <div class="subtitle">Core Scanner KPIs + Executive dashboard</div>
       </div>
       <div class="pill">📄 File: <b style="margin-left:6px;">{file_label}</b></div>
     </div>
@@ -654,9 +662,24 @@ col_dest_tote = find_col(df_scan, ["Destination TOTE", "Destination Tote", "Dest
 col_dup_data = find_col(df_scan, ["Duplicate Data", "Duplicate", "Column S", "S"])
 
 # =========================================================
-# Sidebar filters
+# Sidebar page navigation + filters (without "Filters" heading)
 # =========================================================
-st.sidebar.header("🎛 Filters")
+st.sidebar.markdown("## 📂 Pages")
+page = st.sidebar.radio(
+    "Go to",
+    [
+        "📊 Executive Dashboard",
+        "📌 total",
+        "🎯 exception pct (MAIN)",
+        "📷 overall pct",
+        "🚚 shipping lanes",
+        "🧾 carrier",
+        "🧪 scan",
+        "🧯 Conveyor Alerts",
+        "🛠 mission error",
+    ],
+    index=0
+)
 
 areas_all = sorted(df_exc_pct["Area"].dropna().unique().tolist())
 areas = st.sidebar.multiselect("Area", areas_all, default=areas_all)
@@ -684,6 +707,7 @@ scan_f = df_scan[
     & (df_scan["Area"].isin(areas))
     & (df_scan["Decision Point"].isin(selected_dps))
 ].copy()
+
 
 # =========================================================
 # Core Scanner KPI CALCS
@@ -770,7 +794,7 @@ st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 # Tabs (added Executive Dashboard)
 # =========================================================
 tabs = st.tabs([
-    "📊 Executive Dashboard (PowerBI-style)",
+    "📊 Executive Dashboard",
     "📌 total",
     "🎯 exception pct (MAIN)",
     "📷 overall pct",
@@ -782,10 +806,10 @@ tabs = st.tabs([
 ])
 
 # =========================================================
-# TAB 0: Executive Dashboard (PowerBI-style)
+# TAB 0: Executive Dashboard 
 # =========================================================
 with tabs[0]:
-    st.markdown('<div class="section">Executive Dashboard (PowerBI-style)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section">Executive Dashboard</div>', unsafe_allow_html=True)
     st.caption("High-level view: last 24h shift split + most affected totes + ship lane % share. Carrier/Area colours preserved.")
 
     if scan_f.empty:
